@@ -1,0 +1,352 @@
+onclick="clearFilters()">Clear Filters</button>
+      <div class="table-wrap" style="margin-top:20px">
+        <table>
+          <thead>
+            <tr><th>DATE</th><th>ACCOUNT</th><th>TYPE</th><th>AMOUNT</th><th>BALANCE</th></tr>
+          </thead>
+          <tbody id="transactionRows"></tbody>
+        </table>
+      </div>
+      <p id="transactionMessage" class="message"></p>
+    </div>
+  </section>
+
+  <!-- CREATE ACCOUNT -->
+  <section id="newaccount" class="section">
+    <div class="panel" style="max-width:600px">
+      <div class="panel-head"><h2>Open New Account</h2></div>
+      <form id="accountForm">
+        <label for="holderName">Account Holder Name</label>
+        <input id="holderName" maxlength="70" placeholder="Enter full name" required>
+
+        <label for="phoneNumber">Phone Number</label>
+        <input id="phoneNumber" maxlength="20" placeholder="Enter phone number" required>
+
+        <label for="openingBalance">Opening Balance (₹)</label>
+        <input id="openingBalance" type="number" min="0" step="0.01" value="1000" required>
+
+        <button class="btn btn-primary full" type="submit">Create Account</button>
+      </form>
+      <p id="formMessage" class="message"></p>
+    </div>
+  </section>
+
+  <footer>FINOVA BANK · Banking Management Mini Project · Educational Demo Only</footer>
+</main>
+</div>
+
+<script>
+const KEY = "finovaBankData";
+let accounts = [];
+
+try {
+  const data = JSON.parse(localStorage.getItem(KEY) || "[]");
+  accounts = Array.isArray(data) ? data : [];
+} catch {
+  accounts = [];
+}
+
+function today() {
+  const d = new Date();
+  d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+  return d.toISOString().slice(0, 10);
+}
+
+function money(n) {
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency", currency: "INR"
+  }).format(n);
+}
+
+function save() {
+  try {
+    localStorage.setItem(KEY, JSON.stringify(accounts));
+  } catch {
+    alert("Unable to save data in this browser.");
+  }
+}
+
+function safe(s) {
+  return String(s).replace(/[&<>"']/g, c => ({
+    "&":"&amp;", "<":"&lt;", ">":"&gt;",
+    '"':"&quot;", "'":"&#39;"
+  })[c]);
+}
+
+function msg(id, text, ok = true) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = text;
+  el.className = "message " + (ok ? "success" : "error");
+}
+
+function showSection(id, button) {
+  document.querySelectorAll(".section").forEach(s => s.classList.remove("active"));
+  document.getElementById(id).classList.add("active");
+
+  document.querySelectorAll(".nav-btn").forEach(b => b.classList.remove("active"));
+  if (button) button.classList.add("active");
+  else {
+    const nav = [...document.querySelectorAll(".nav-btn")].find(b =>
+      b.getAttribute("onclick")?.includes("'" + id + "'")
+    );
+    if (nav) nav.classList.add("active");
+  }
+
+  const titles = {
+    dashboard: "Dashboard Overview",
+    accounts: "Manage Accounts",
+    transactions: "Transaction History",
+    newaccount: "Create New Account"
+  };
+  document.getElementById("pageTitle").textContent = titles[id] || "Finova Bank";
+  if (id === "accounts") renderAccounts();
+  if (id === "transactions") renderTransactions();
+}
+
+document.getElementById("accountForm").addEventListener("submit", function(e) {
+  e.preventDefault();
+
+  const name = document.getElementById("holderName").value.trim();
+  const phone = document.getElementById("phoneNumber").value.trim();
+  const opening = Number(document.getElementById("openingBalance").value);
+
+  if (!name || !phone || !Number.isFinite(opening) || opening < 0) {
+    msg("formMessage", "Please enter valid account details.", false);
+    return;
+  }
+
+  const number = Math.max(100000, ...accounts.map(a => a.number)) + 1;
+
+  const account = {
+    number,
+    name,
+    phone,
+    balance: opening,
+    withdrawalDate: today(),
+    withdrawnToday: 0,
+    transactions: []
+  };
+
+  addTransaction(account, "Account Created", opening);
+  accounts.push(account);
+  save();
+  this.reset();
+  document.getElementById("openingBalance").value = 1000;
+
+  renderAll();
+  msg("formMessage", "Account created successfully! Account No: " + number);
+});
+
+function chooseAccount() {
+  if (!accounts.length) {
+    msg("operationMessage", "Please create an account first.", false);
+    return null;
+  }
+
+  const value = prompt(
+    "Enter account number:\n" +
+    accounts.map(a => a.number + " - " + a.name).join("\n")
+  );
+
+  if (value === null) return null;
+
+  const account = accounts.find(a => String(a.number) === value.trim());
+
+  if (!account) {
+    msg("operationMessage", "Account not found. Check the account number.", false);
+    return null;
+  }
+  return account;
+}
+
+function addTransaction(account, type, amount) {
+  account.transactions.push({
+    date: today(),
+    type,
+    amount,
+    balance: account.balance
+  });
+}
+
+function depositMoney() {
+  const a = chooseAccount();
+  if (!a) return;
+
+  const value = prompt("Enter deposit amount (₹):");
+  if (value === null) return;
+  const amount = Number(value);
+
+  if (!Number.isFinite(amount) || amount <= 0) {
+    msg("operationMessage", "Enter a valid amount greater than zero.", false);
+    return;
+  }
+
+  a.balance += amount;
+  addTransaction(a, "Deposit", amount);
+  save();
+  renderAll();
+  msg("operationMessage", "Deposit successful! New balance: " + money(a.balance));
+}
+
+function withdrawMoney() {
+  const a = chooseAccount();
+  if (!a) return;
+
+  const value = prompt("Enter withdrawal amount (₹):");
+  if (value === null) return;
+  const amount = Number(value);
+
+  if (!Number.isFinite(amount) || amount <= 0) {
+    msg("operationMessage", "Enter a valid amount greater than zero.", false);
+    return;
+  }
+
+  if (amount > a.balance) {
+    msg("operationMessage", "Insufficient balance.", false);
+    return;
+  }
+
+  if (a.withdrawalDate !== today()) {
+    a.withdrawalDate = today();
+    a.withdrawnToday = 0;
+  }
+
+  if (a.withdrawnToday + amount > 10000) {
+    msg("operationMessage", "Daily withdrawal limit is ₹10,000.", false);
+    return;
+  }
+
+  a.balance -= amount;
+  a.withdrawnToday += amount;
+  addTransaction(a, "Withdrawal", amount);
+  save();
+  renderAll();
+  msg("operationMessage", "Withdrawal successful! Balance: " + money(a.balance));
+}
+
+function checkBalance() {
+  const a = chooseAccount();
+  if (!a) return;
+  msg("operationMessage", a.name + " | Account: " + a.number +
+      " | Balance: " + money(a.balance));
+}
+
+function showPassbook() {
+  const a = chooseAccount();
+  if (!a) return;
+
+  const from = prompt("From date (YYYY-MM-DD):", today());
+  if (from === null) return;
+  const to = prompt("To date (YYYY-MM-DD):", today());
+  if (to === null) return;
+
+  if (!validDate(from) || !validDate(to) || from > to) {
+    msg("operationMessage", "Enter valid dates in YYYY-MM-DD format.", false);
+    return;
+  }
+
+  const rows = a.transactions.filter(t => t.date >= from && t.date <= to);
+  const text = rows.map(t =>
+    t.date + " | " + t.type + " | " + money(t.amount) +
+    " | Balance: " + money(t.balance)
+  ).join("\n");
+
+  alert("FINOVA PASSBOOK\nAccount: " + a.number + "\n\n" +
+    (text || "No transactions found for this date range."));
+}
+
+function validDate(s) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const d = new Date(s + "T00:00:00Z");
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0,10) === s;
+}
+
+function renderAccounts() {
+  const q = (document.getElementById("accountSearch")?.value || "").toLowerCase();
+  const rows = accounts.filter(a =>
+    a.name.toLowerCase().includes(q) || String(a.number).includes(q)
+  );
+
+  document.getElementById("accountRows").innerHTML = rows.length
+    ? rows.map(a => `<tr>
+        <td>${a.number}</td>
+        <td>${safe(a.name)}</td>
+        <td>${safe(a.phone)}</td>
+        <td>${money(a.balance)}</td>
+      </tr>`).join("")
+    : '<tr><td colspan="4" class="empty">No accounts found.</td></tr>';
+}
+
+function renderTransactions() {
+  const from = document.getElementById("fromDate").value;
+  const to = document.getElementById("toDate").value;
+
+  if ((from && !validDate(from)) || (to && !validDate(to)) || (from && to && from > to)) {
+    msg("transactionMessage", "Please select a valid date range.", false);
+    return;
+  }
+
+  const rows = accounts.flatMap(a => a.transactions.map(t => ({
+    ...t, number: a.number, name: a.name
+  }))).filter(t => (!from || t.date >= from) && (!to || t.date <= to))
+    .sort((a,b) => b.date.localeCompare(a.date));
+
+  document.getElementById("transactionRows").innerHTML = rows.length
+    ? rows.map(t => `<tr>
+        <td>${t.date}</td>
+        <td>${safe(t.name)} (#${t.number})</td>
+        <td class="${t.type === "Withdrawal" ? "type-out" : "type-in"}">${safe(t.type)}</td>
+        <td>${money(t.amount)}</td>
+        <td>${money(t.balance)}</td>
+      </tr>`).join("")
+    : '<tr><td colspan="5" class="empty">No transactions found.</td></tr>';
+
+  msg("transactionMessage", rows.length + " transaction(s) found.");
+}
+
+function clearFilters() {
+  document.getElementById("fromDate").value = "";
+  document.getElementById("toDate").value = "";
+  renderTransactions();
+}
+
+function renderRecent() {
+  const rows = accounts.flatMap(a => a.transactions.map(t => ({
+    ...t, number: a.number, name: a.name
+  }))).sort((a,b) => b.date.localeCompare(a.date)).slice(0,5);
+
+  document.getElementById("recentActivity").innerHTML = rows.length
+    ? rows.map(t => `<div class="list-card">
+        <div><strong>${safe(t.type)}</strong><small>${safe(t.name)} · ${t.date}</small></div>
+        <div style="text-align:right">
+          <strong class="${t.type === "Withdrawal" ? "type-out" : "type-in"}">${money(t.amount)}</strong>
+          <small>#${t.number}</small>
+        </div>
+      </div>`).join("")
+    : '<p class="muted">No activity yet. Create an account to get started.</p>';
+}
+
+function renderAll() {
+  document.getElementById("totalAccounts").textContent = accounts.length;
+  document.getElementById("totalBalance").textContent =
+    money(accounts.reduce((sum,a) => sum + a.balance, 0));
+
+  const tx = accounts.flatMap(a => a.transactions).filter(t => t.date === today());
+
+  document.getElementById("totalDeposits").textContent = money(
+    tx.filter(t => t.type === "Deposit").reduce((sum,t) => sum + t.amount, 0)
+  );
+  document.getElementById("totalWithdrawals").textContent = money(
+    tx.filter(t => t.type === "Withdrawal").reduce((sum,t) => sum + t.amount, 0)
+  );
+
+  renderAccounts();
+  renderTransactions();
+  renderRecent();
+}
+
+renderAll();
+</script>
+</body>
+</html>
